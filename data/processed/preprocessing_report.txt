@@ -1,0 +1,20 @@
+STOCKPILOT ML - PREPROCESSING REPORT
+=============================================
+Original records: 1,067,371
+Exact duplicate rows removed: 34,335
+Invalid required-field rows excluded: 0
+Negative-quantity rows excluded from initial target: 22,496
+Zero-quantity rows excluded from initial target: 0
+Positive-quantity transaction rows: 1,010,540
+Unique products in daily dataset: 4,984
+Daily product records: 534,499
+First daily date: 2009-12-01 00:00:00
+Last daily date: 2011-12-09 00:00:00
+
+Target definition:
+Sum of positive recorded quantities per product per calendar day.
+
+Important limitations:
+This target is a proxy for gross recorded sales, not true latent demand.
+Days without recorded sales are not yet explicitly represented.
+Inventory and stockout data are unavailable in the source dataset.
