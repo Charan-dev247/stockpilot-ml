@@ -1,0 +1,33 @@
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model checkpoints and generated artifacts
+checkpoints/
+outputs/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Logs and temporary files
+*.log
+.DS_Store
+
+# Local datasets
+data/raw/
+data/processed/*.csv
+
+# Large generated prediction files
+reports/*_predictions.csv
