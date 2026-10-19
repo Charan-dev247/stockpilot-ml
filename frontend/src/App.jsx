@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import {
 } from 'recharts'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
 const money = (n) => Number(n || 0).toLocaleString('en-IN')
 const compact = (n) =>
@@ -66,7 +67,7 @@ function App() {
   const pageSize = 10
 
   async function loadSummary() {
-    const response = await fetch('/api/summary')
+    const response = await fetch(`${API_BASE_URL}/api/summary`)
     if (!response.ok) throw new Error('Could not load inventory summary.')
     setSummary(await response.json())
   }
@@ -84,7 +85,7 @@ function App() {
       if (search.trim()) params.set('search', search.trim())
       if (recommendation) params.set('recommendation', recommendation)
 
-      const response = await fetch(`/api/inventory?${params}`)
+      const response = await fetch(`${API_BASE_URL}/api/inventory?${params}`)
       if (!response.ok) throw new Error('Could not load inventory recommendations.')
       const data = await response.json()
       setItems(data.items || [])
@@ -105,9 +106,9 @@ function App() {
       try {
         const [modelsResponse, validationResponse, testResponse] =
           await Promise.all([
-            fetch('/api/evaluation/models'),
-            fetch('/api/evaluation/inventory?period=validation'),
-            fetch('/api/evaluation/inventory?period=test'),
+            fetch(`${API_BASE_URL}/api/evaluation/models`),
+            fetch(`${API_BASE_URL}/api/evaluation/inventory?period=validation`),
+            fetch(`${API_BASE_URL}/api/evaluation/inventory?period=test`),
           ])
 
         if (!modelsResponse.ok || !validationResponse.ok || !testResponse.ok) {
@@ -162,7 +163,7 @@ function App() {
 
   async function openProduct(stockCode) {
     try {
-      const response = await fetch(`/api/inventory/${encodeURIComponent(stockCode)}`)
+      const response = await fetch(`${API_BASE_URL}/api/inventory/${encodeURIComponent(stockCode)}`)
       if (!response.ok) throw new Error('Product details unavailable.')
       setSelectedProduct(await response.json())
     } catch (err) {
@@ -213,10 +214,10 @@ function App() {
         </nav>
 
         <div className="nav-label tools-label">TOOLS</div>
-        <button className="nav-item" onClick={() => window.open('http://127.0.0.1:8000/docs', '_blank')}>
+        <button className="nav-item" onClick={() => window.open(`${API_BASE_URL}/docs`, '_blank')}>
           <Settings2 size={18} /><span>API explorer</span>
         </button>
-        <button className="nav-item" onClick={() => window.open('http://127.0.0.1:8000/health', '_blank')}>
+        <button className="nav-item" onClick={() => window.open(`${API_BASE_URL}/health`, '_blank')}>
           <ShieldCheck size={18} /><span>System health</span>
         </button>
 
@@ -225,12 +226,12 @@ function App() {
             <div className="help-icon"><CircleHelp size={18} /></div>
             <strong>Need a hand?</strong>
             <p>Explore the API docs to learn how StockPilot works.</p>
-            <button onClick={() => window.open('http://127.0.0.1:8000/docs', '_blank')}>Explore documentation ↗</button>
+            <button onClick={() => window.open(`${API_BASE_URL}/docs`, '_blank')}>Explore documentation ↗</button>
           </div>
           <div className="user-profile">
             <div className="user-avatar">SP</div>
             <div className="user-copy"><strong>Project workspace</strong><span>Local development</span></div>
-            <span className="online-dot" title="Local app" />
+            <span className="online-dot" title={API_BASE_URL ? "Deployed API" : "Local app"} />
           </div>
         </div>
       </aside>
@@ -482,7 +483,7 @@ function App() {
 
           <footer className="page-footer">
             <span>© 2026 StockPilot ML · Retail intelligence prototype</span>
-            <span><span className="online-dot" /> Connected to local API</span>
+            <span><span className="online-dot" /> {API_BASE_URL ? 'Connected to deployed API' : 'Connected to local API'}</span>
           </footer>
         </div>
       </main>
