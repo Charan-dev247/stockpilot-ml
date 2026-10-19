@@ -1,0 +1,4 @@
+policy,products,total_demand_units,fulfilled_units,lost_units,unit_fill_rate_pct,products_with_stockout,total_stockout_days,average_on_hand_per_product,total_orders,total_units_ordered
+baseline_average_demand,4454.0,1774713.0,1041626.0,733087.0,58.69264495160626,2111.0,22582.0,31.59166575646145,26052.0,977618.0
+safety_stock,4454.0,1774713.0,1416517.0,358196.0,79.81668021815358,1194.0,8673.0,125.91069268639991,26835.0,1321920.0
+activity_aware_safety_stock,4454.0,1774713.0,1317295.0,457418.0,74.22580439766881,1521.0,15200.0,92.44198351921746,23472.0,1229063.0
