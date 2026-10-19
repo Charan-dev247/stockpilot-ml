@@ -18,6 +18,9 @@ ACTIVITY_PATH = ROOT / "reports" / "inventory_activity_analysis.csv"
 REPORTS_DIR = ROOT / "reports"
 DETAIL_PATH = REPORTS_DIR / "inventory_simulation_product_results.csv"
 SUMMARY_PATH = REPORTS_DIR / "inventory_simulation_summary.csv"
+ACTIVITY_SUMMARY_PATH = (
+    REPORTS_DIR / "inventory_simulation_activity_summary.csv"
+)
 
 TRAIN_CUTOFF = pd.Timestamp("2011-05-01")
 VALIDATION_START = pd.Timestamp("2011-08-21")
@@ -26,13 +29,13 @@ VALIDATION_END = pd.Timestamp("2011-12-09")
 LEAD_TIME_DAYS = 7
 REVIEW_PERIOD_DAYS = 7
 SERVICE_LEVEL = 0.95
-Z_SCORE = norm.ppf(SERVICE_LEVEL)
 
+Z_SCORE = norm.ppf(SERVICE_LEVEL)
 PROTECTION_DAYS = LEAD_TIME_DAYS + REVIEW_PERIOD_DAYS
 
 
 # ============================================================
-# Load data
+# Load and validate data
 # ============================================================
 df = pd.read_csv(
     DATA_PATH,
@@ -43,12 +46,11 @@ df = pd.read_csv(
 df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
 df["demand"] = pd.to_numeric(df["demand"], errors="coerce")
 
-df = df.dropna(subset=["StockCode", "Date", "demand"])
+df = df.dropna(subset=["StockCode", "Date", "demand"]).copy()
 
 if (df["demand"] < 0).any():
     raise ValueError(
-        "The selected demand column must be non-negative. "
-        "Check the target definition before simulating."
+        "Negative values found in demand. Verify the selected target."
     )
 
 if df.duplicated(["StockCode", "Date"]).any():
@@ -60,17 +62,22 @@ activity = pd.read_csv(
     low_memory=False,
 )
 
-required_activity_cols = {"StockCode", "activity_status"}
-if not required_activity_cols.issubset(activity.columns):
+required_cols = {"StockCode", "activity_status"}
+if not required_cols.issubset(activity.columns):
     raise ValueError(
-        f"Activity report must contain {required_activity_cols}"
+        f"Activity report must contain columns: {required_cols}"
     )
 
-activity_lookup = activity.set_index("StockCode")["activity_status"].to_dict()
+if activity["StockCode"].duplicated().any():
+    raise ValueError("Duplicate StockCode values in activity report.")
+
+activity_lookup = (
+    activity.set_index("StockCode")["activity_status"].to_dict()
+)
 
 
 # ============================================================
-# Estimate policy parameters from training data only
+# Estimate policy parameters using training data only
 # ============================================================
 train = df[df["Date"] <= TRAIN_CUTOFF].copy()
 
@@ -79,102 +86,129 @@ stats_rows = []
 for sku, product in train.groupby("StockCode", sort=False):
     product = product.sort_values("Date").set_index("Date")
 
-    # Use consecutive calendar days from first recorded date to cutoff.
+    # Consecutive calendar days from first recorded date to cutoff.
     calendar = pd.date_range(
-        product.index.min(),
-        TRAIN_CUTOFF,
+        start=product.index.min(),
+        end=TRAIN_CUTOFF,
         freq="D",
     )
-    daily = product["demand"].reindex(calendar, fill_value=0).astype(float)
+
+    daily = (
+        product["demand"]
+        .reindex(calendar, fill_value=0)
+        .astype(float)
+    )
 
     mean_demand = float(daily.mean())
-    std_demand = float(daily.std(ddof=1)) if len(daily) > 1 else 0.0
-    std_demand = max(std_demand, 0.0)
+    daily_std = float(daily.std(ddof=1)) if len(daily) > 1 else 0.0
+    daily_std = max(daily_std, 0.0)
 
     baseline_level = mean_demand * PROTECTION_DAYS
 
     safety_level = (
         mean_demand * PROTECTION_DAYS
-        + Z_SCORE * std_demand * np.sqrt(PROTECTION_DAYS)
+        + Z_SCORE * daily_std * np.sqrt(PROTECTION_DAYS)
     )
-
-    status = activity_lookup.get(sku, "unknown")
 
     stats_rows.append({
         "StockCode": sku,
         "mean_daily_demand": mean_demand,
-        "daily_demand_std": std_demand,
+        "daily_demand_std": daily_std,
         "baseline_order_up_to": int(np.ceil(baseline_level)),
         "safety_order_up_to": int(np.ceil(safety_level)),
-        "activity_status": status,
+        "activity_status": activity_lookup.get(sku, "unknown"),
     })
 
 stats = pd.DataFrame(stats_rows)
 
-# The activity-aware policy suppresses routine replenishment for
-# products not classified as recently active. This is an explicit
-# policy assumption, not proof that the products are discontinued.
+if stats.empty:
+    raise ValueError("No products found in the training period.")
+
 stats["activity_eligible"] = (
     stats["activity_status"] == "recently_active"
 )
+
+stats = stats.sort_values("StockCode").reset_index(drop=True)
 
 
 # ============================================================
 # Build validation demand matrix
 # ============================================================
 validation_dates = pd.date_range(
-    VALIDATION_START,
-    VALIDATION_END,
+    start=VALIDATION_START,
+    end=VALIDATION_END,
     freq="D",
 )
 
 validation = df[
     df["Date"].between(VALIDATION_START, VALIDATION_END)
+    & df["StockCode"].isin(stats["StockCode"])
 ].copy()
 
-validation = validation[
-    validation["StockCode"].isin(stats["StockCode"])
-]
-
 demand_matrix = (
-    validation.pivot(index="Date", columns="StockCode", values="demand")
-    .reindex(index=validation_dates, columns=stats["StockCode"], fill_value=0)
+    validation.pivot(
+        index="Date",
+        columns="StockCode",
+        values="demand",
+    )
+    .reindex(
+        index=validation_dates,
+        columns=stats["StockCode"],
+        fill_value=0,
+    )
     .fillna(0)
 )
 
-# Products missing a recorded date are treated as having zero recorded
-# demand on that date. This is a proxy, not verified unconstrained demand.
+# Missing product-date observations are treated as zero recorded demand.
+# They are not proof of zero unconstrained customer demand.
 
 
 # ============================================================
 # Inventory simulation
 # ============================================================
-def simulate_policy(policy_name, order_up_to, eligible):
+def simulate_policy(policy_name, target_column, activity_aware=False):
     results = []
+
+    target_lookup = stats.set_index("StockCode")[target_column]
+    baseline_lookup = stats.set_index("StockCode")[
+        "baseline_order_up_to"
+    ]
+    eligibility_lookup = stats.set_index("StockCode")[
+        "activity_eligible"
+    ]
 
     for row in stats.itertuples(index=False):
         sku = row.StockCode
-        target = int(order_up_to[sku])
-        can_replenish = bool(eligible[sku])
+        target = int(target_lookup.loc[sku])
+        can_replenish = (
+            bool(eligibility_lookup.loc[sku])
+            if activity_aware
+            else True
+        )
 
-        # Start at the target for eligible products to avoid giving one
-        # policy an arbitrary initial-stock advantage.
-        on_hand = target if can_replenish else 0
+        # Equal initial inventory for all policies:
+        # baseline order-up-to stock, fixed before simulation starts.
+        on_hand = int(baseline_lookup.loc[sku])
 
-        # Heap entries are (arrival_day_index, quantity).
-        arrivals = []
+        # Heap entries: (arrival_day_index, quantity).
+        outstanding_orders = []
+
         inventory_sum = 0.0
         total_demand = 0.0
-        fulfilled = 0.0
+        fulfilled_units = 0.0
         lost_units = 0.0
         stockout_days = 0
         order_count = 0
         units_ordered = 0
 
         for day_idx, date in enumerate(validation_dates):
-            # Receive orders arriving today.
-            while arrivals and arrivals[0][0] <= day_idx:
-                _, quantity = heapq.heappop(arrivals)
+
+            # Receive orders scheduled to arrive at the start of today.
+            while (
+                outstanding_orders
+                and outstanding_orders[0][0] <= day_idx
+            ):
+                _, quantity = heapq.heappop(outstanding_orders)
                 on_hand += quantity
 
             demand = float(demand_matrix.at[date, sku])
@@ -184,36 +218,47 @@ def simulate_policy(policy_name, order_up_to, eligible):
             on_hand -= fulfilled_today
 
             lost_today = demand - fulfilled_today
-            fulfilled += fulfilled_today
+            fulfilled_units += fulfilled_today
             lost_units += lost_today
 
             if lost_today > 0:
                 stockout_days += 1
 
-            # Review after today's demand. Inventory position includes
-            # stock on hand and outstanding orders.
+            # Review inventory after demand, every review-period days.
             if (
                 can_replenish
                 and (day_idx + 1) % REVIEW_PERIOD_DAYS == 0
             ):
-                on_order = sum(qty for _, qty in arrivals)
+                on_order = sum(
+                    quantity
+                    for _, quantity in outstanding_orders
+                )
                 inventory_position = on_hand + on_order
 
                 if inventory_position < target:
-                    quantity = int(np.ceil(target - inventory_position))
+                    order_quantity = int(
+                        np.ceil(target - inventory_position)
+                    )
 
-                    if quantity > 0:
-                        # Lead time of 7 days means an order placed on
-                        # day t arrives at the start of day t + 7.
-                        arrival_idx = day_idx + LEAD_TIME_DAYS + 1
-                        heapq.heappush(arrivals, (arrival_idx, quantity))
+                    if order_quantity > 0:
+                        # Order placed after today's demand arrives at
+                        # the start of the day 7 calendar days later.
+                        arrival_idx = day_idx + LEAD_TIME_DAYS
+
+                        heapq.heappush(
+                            outstanding_orders,
+                            (arrival_idx, order_quantity),
+                        )
+
                         order_count += 1
-                        units_ordered += quantity
+                        units_ordered += order_quantity
 
             inventory_sum += on_hand
 
-        service_level = (
-            fulfilled / total_demand if total_demand > 0 else np.nan
+        fill_rate = (
+            fulfilled_units / total_demand
+            if total_demand > 0
+            else np.nan
         )
 
         results.append({
@@ -222,41 +267,38 @@ def simulate_policy(policy_name, order_up_to, eligible):
             "activity_status": row.activity_status,
             "activity_eligible": can_replenish,
             "validation_demand": total_demand,
-            "fulfilled_units": fulfilled,
+            "fulfilled_units": fulfilled_units,
             "lost_units": lost_units,
-            "unit_fill_rate": service_level,
+            "unit_fill_rate": fill_rate,
             "stockout_days": stockout_days,
+            "inventory_unit_days": inventory_sum,
             "average_on_hand": inventory_sum / len(validation_dates),
             "orders_placed": order_count,
             "units_ordered": units_ordered,
             "order_up_to_level": target,
+            "initial_on_hand": int(baseline_lookup.loc[sku]),
         })
 
     return pd.DataFrame(results)
 
 
-baseline_targets = stats.set_index("StockCode")["baseline_order_up_to"]
-safety_targets = stats.set_index("StockCode")["safety_order_up_to"]
-
-all_eligible = pd.Series(True, index=stats["StockCode"])
-active_only = stats.set_index("StockCode")["activity_eligible"]
-
+# ============================================================
+# Run all three policies
+# ============================================================
 baseline_results = simulate_policy(
-    "baseline_average_demand",
-    baseline_targets,
-    all_eligible,
+    policy_name="baseline_average_demand",
+    target_column="baseline_order_up_to",
 )
 
 safety_results = simulate_policy(
-    "safety_stock",
-    safety_targets,
-    all_eligible,
+    policy_name="safety_stock",
+    target_column="safety_order_up_to",
 )
 
 activity_results = simulate_policy(
-    "activity_aware_safety_stock",
-    safety_targets,
-    active_only,
+    policy_name="activity_aware_safety_stock",
+    target_column="safety_order_up_to",
+    activity_aware=True,
 )
 
 details = pd.concat(
@@ -269,48 +311,89 @@ details.to_csv(DETAIL_PATH, index=False)
 
 
 # ============================================================
-# Summaries
+# Summary metrics
 # ============================================================
 def summarize(group):
     total_demand = group["validation_demand"].sum()
-    total_fulfilled = group["fulfilled_units"].sum()
+    fulfilled = group["fulfilled_units"].sum()
 
-    return pd.Series({
+    return {
         "products": group["StockCode"].nunique(),
         "total_demand_units": total_demand,
-        "fulfilled_units": total_fulfilled,
+        "fulfilled_units": fulfilled,
         "lost_units": group["lost_units"].sum(),
         "unit_fill_rate_pct": (
-            100 * total_fulfilled / total_demand
-            if total_demand > 0 else np.nan
+            100 * fulfilled / total_demand
+            if total_demand > 0
+            else np.nan
         ),
-        "products_with_stockout": int((group["lost_units"] > 0).sum()),
+        "products_with_stockout": int(
+            (group["lost_units"] > 0).sum()
+        ),
         "total_stockout_days": group["stockout_days"].sum(),
         "average_on_hand_per_product": group["average_on_hand"].mean(),
         "total_orders": group["orders_placed"].sum(),
         "total_units_ordered": group["units_ordered"].sum(),
+    }
+
+
+overall_rows = []
+
+for policy, group in details.groupby("policy", sort=False):
+    overall_rows.append({
+        "policy": policy,
+        **summarize(group),
     })
 
-
-summary = (
-    details.groupby("policy", sort=False)
-    .apply(summarize, include_groups=False)
-    .reset_index()
-)
-
+summary = pd.DataFrame(overall_rows)
 summary.to_csv(SUMMARY_PATH, index=False)
 
+
+# ============================================================
+# Breakdown by activity category
+# ============================================================
+activity_rows = []
+
+for (policy, status), group in details.groupby(
+    ["policy", "activity_status"],
+    sort=False,
+    dropna=False,
+):
+    activity_rows.append({
+        "policy": policy,
+        "activity_status": status,
+        **summarize(group),
+    })
+
+activity_summary = pd.DataFrame(activity_rows)
+activity_summary.to_csv(ACTIVITY_SUMMARY_PATH, index=False)
+
+
+# ============================================================
+# Print results
+# ============================================================
 print("\n=== Inventory simulation ===")
 print(f"Training cutoff: {TRAIN_CUTOFF.date()}")
-print(f"Validation: {VALIDATION_START.date()} to {VALIDATION_END.date()}")
+print(
+    f"Validation: {VALIDATION_START.date()} "
+    f"to {VALIDATION_END.date()}"
+)
 print(f"Lead time: {LEAD_TIME_DAYS} days")
 print(f"Review period: {REVIEW_PERIOD_DAYS} days")
 print(f"Service-level assumption: {SERVICE_LEVEL:.0%}")
 print(f"Products in training cohort: {len(stats):,}")
-print(f"Activity-eligible products: {int(stats['activity_eligible'].sum()):,}")
+print(
+    "Activity-eligible products: "
+    f"{int(stats['activity_eligible'].sum()):,}"
+)
+print("Initial inventory: baseline order-up-to level for every policy")
 
-print("\n=== Policy comparison ===")
+print("\n=== Overall policy comparison ===")
 print(summary.round(2).to_string(index=False))
 
+print("\n=== Policy comparison by activity category ===")
+print(activity_summary.round(2).to_string(index=False))
+
 print(f"\nSaved detailed results: {DETAIL_PATH}")
-print(f"Saved summary: {SUMMARY_PATH}")
+print(f"Saved overall summary: {SUMMARY_PATH}")
+print(f"Saved activity summary: {ACTIVITY_SUMMARY_PATH}")

@@ -1,0 +1,13 @@
+policy,activity_status,products,total_demand_units,fulfilled_units,lost_units,unit_fill_rate_pct,products_with_stockout,total_stockout_days,average_on_hand_per_product,total_orders,total_units_ordered
+baseline_average_demand,recently_active,2441,1589699.0,985108.0,604591.0,61.968209076057796,1657,18063,49.23574742296577,22905,924221
+baseline_average_demand,stale_over_90_days,1482,74554.0,18676.0,55878.0,25.050299112053008,174,1711,13.810446073603968,1062,17772
+baseline_average_demand,no_sales_in_recent_28_days,523,108912.0,37842.0,71070.0,34.74548259144998,279,2741,15.768504642309612,2085,35625
+baseline_average_demand,no_recorded_sales,8,1548.0,0.0,1548.0,0.0,1,67,0.0,0,0
+safety_stock,recently_active,2441,1589699.0,1294533.0,295166.0,81.43258566558826,1047,7058,157.8774760011958,24404,1535818
+safety_stock,stale_over_90_days,1482,74554.0,34249.0,40305.0,45.9385143654264,117,975,70.49044996413417,2337,129124
+safety_stock,no_sales_in_recent_28_days,523,108912.0,62808.0,46104.0,57.66857646540326,187,1413,59.138700842333726,2607,86449
+safety_stock,no_recorded_sales,8,1548.0,0.0,1548.0,0.0,1,67,0.0,0,0
+activity_aware_safety_stock,recently_active,2441,1589699.0,1294533.0,295166.0,81.43258566558826,1047,7058,157.8774760011958,24404,1535818
+activity_aware_safety_stock,stale_over_90_days,1482,74554.0,3691.0,70863.0,4.950773935670789,192,2637,13.092837777048302,0,0
+activity_aware_safety_stock,no_sales_in_recent_28_days,523,108912.0,6753.0,102159.0,6.2004186866461,309,4917,12.063976021911012,0,0
+activity_aware_safety_stock,no_recorded_sales,8,1548.0,0.0,1548.0,0.0,1,67,0.0,0,0

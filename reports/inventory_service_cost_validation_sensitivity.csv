@@ -1,0 +1,13 @@
+holding_cost_per_unit_day,minimum_fill_rate_pct,eligible_policy_count,cheapest_eligible_policy,achieved_fill_rate_pct,total_simulated_cost
+0.001,80,2,safety_stock,86.584046988209,540665.556
+0.001,85,1,safety_stock,86.584046988209,540665.556
+0.001,90,0,No policy qualifies,,
+0.001,95,0,No policy qualifies,,
+0.01,80,2,activity_aware_safety_stock,84.95744754322739,983246.16
+0.01,85,1,safety_stock,86.584046988209,1084675.56
+0.01,90,0,No policy qualifies,,
+0.01,95,0,No policy qualifies,,
+0.05,80,2,activity_aware_safety_stock,84.95744754322739,2904722.8000000003
+0.05,85,1,safety_stock,86.584046988209,3502497.8000000003
+0.05,90,0,No policy qualifies,,
+0.05,95,0,No policy qualifies,,
