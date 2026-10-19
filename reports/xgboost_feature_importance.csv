@@ -1,0 +1,10 @@
+Feature,Importance
+active_days_28,0.16794977
+rolling_mean_28,0.15031181
+lag_7,0.13205254
+rolling_mean_7,0.10889722
+lag_1,0.10640132
+month,0.10257848
+rolling_std_7,0.095831804
+day_of_week,0.0896226
+lag_14,0.04635447
